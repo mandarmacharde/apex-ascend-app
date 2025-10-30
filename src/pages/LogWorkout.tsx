@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { User } from "@supabase/supabase-js";
 import { Dumbbell, ArrowLeft, Plus, Trash2, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { insertNewSet, getOrCreateExerciseIdByName, startNewWorkout, completeWorkout } from "@/services/apiWorkouts";
 
 interface WorkoutSet {
   id: string;
@@ -26,6 +27,7 @@ const LogWorkout = () => {
   const [currentReps, setCurrentReps] = useState("");
   const [currentNotes, setCurrentNotes] = useState("");
   const [startTime] = useState(new Date());
+  const [workoutId, setWorkoutId] = useState<string | null>(null);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -50,7 +52,7 @@ const LogWorkout = () => {
     return () => subscription.unsubscribe();
   }, [navigate]);
 
-  const addSet = () => {
+  const addSet = async () => {
     if (!currentExercise || !currentWeight || !currentReps) {
       toast({
         title: "Missing Information",
@@ -59,20 +61,42 @@ const LogWorkout = () => {
       });
       return;
     }
+    try {
+      if (!user?.id) throw new Error("User not authenticated");
 
-    const newSet: WorkoutSet = {
-      id: crypto.randomUUID(),
-      exercise: currentExercise,
-      weight: parseFloat(currentWeight),
-      reps: parseInt(currentReps),
-      notes: currentNotes,
-    };
+      // Ensure workout session exists
+      let activeWorkoutId = workoutId;
+      if (!activeWorkoutId) {
+        const started = await startNewWorkout(user.id);
+        activeWorkoutId = started.id;
+        setWorkoutId(started.id);
+      }
 
-    setSets([...sets, newSet]);
-    setCurrentWeight("");
-    setCurrentReps("");
-    setCurrentNotes("");
-    toast({ title: "Set added!", description: `${currentExercise} logged successfully` });
+      // Ensure exercise exists and insert set immediately
+      const exerciseId = await getOrCreateExerciseIdByName(currentExercise.trim());
+      await insertNewSet(
+        activeWorkoutId as string,
+        exerciseId,
+        parseFloat(currentWeight),
+        parseInt(currentReps),
+        currentNotes || undefined
+      );
+
+      const newSet: WorkoutSet = {
+        id: crypto.randomUUID(),
+        exercise: currentExercise,
+        weight: parseFloat(currentWeight),
+        reps: parseInt(currentReps),
+        notes: currentNotes,
+      };
+      setSets(prev => [...prev, newSet]);
+      setCurrentWeight("");
+      setCurrentReps("");
+      setCurrentNotes("");
+      toast({ title: "Set added!", description: `${currentExercise} logged successfully` });
+    } catch (error: any) {
+      toast({ title: "Error adding set", description: error.message || "An error occurred", variant: "destructive" });
+    }
   };
 
   const removeSet = (id: string) => {
@@ -80,7 +104,7 @@ const LogWorkout = () => {
     toast({ title: "Set removed" });
   };
 
-  const finishWorkout = () => {
+  const finishWorkout = async () => {
     if (sets.length === 0) {
       toast({
         title: "No sets logged",
@@ -93,13 +117,25 @@ const LogWorkout = () => {
     const endTime = new Date();
     const duration = Math.round((endTime.getTime() - startTime.getTime()) / 1000 / 60);
 
-    toast({
-      title: "Workout Complete! 🎉",
-      description: `Logged ${sets.length} sets in ${duration} minutes`,
-    });
+    try {
+      if (!user?.id) throw new Error("User not authenticated");
+      if (!workoutId) throw new Error("No active workout session. Add a set first.");
 
-    // In a real app, this would save to database
-    setTimeout(() => navigate("/dashboard"), 1500);
+      await completeWorkout(workoutId, endTime.toISOString(), `Workout completed in ${duration} minutes`);
+
+      toast({
+        title: "Workout Complete! 🎉",
+        description: `Logged ${sets.length} sets in ${duration} minutes`,
+      });
+
+      setTimeout(() => navigate("/dashboard"), 1500);
+    } catch (error: any) {
+      toast({
+        title: "Error saving workout",
+        description: error.message || "An error occurred",
+        variant: "destructive",
+      });
+    }
   };
 
   if (loading) {

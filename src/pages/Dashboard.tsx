@@ -6,12 +6,20 @@ import { Card } from "@/components/ui/card";
 import { User } from "@supabase/supabase-js";
 import { Dumbbell, TrendingUp, Calendar, LogOut, History, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { signOut } from "@/services/apiAuth";
+import { getWorkoutStatsForUser, seedDemoDataForUser } from "@/services/apiWorkouts";
+import { useWorkoutHistory } from "@/hooks/useWorkoutHistory";
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
+import { BarChart, Bar, CartesianGrid, XAxis } from "recharts";
 
 const Dashboard = () => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [totalWorkouts, setTotalWorkouts] = useState<number>(0);
+  const [weeklyWorkouts, setWeeklyWorkouts] = useState<number>(0);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { metrics } = useWorkoutHistory(user?.id);
 
   useEffect(() => {
     // Check authentication
@@ -35,10 +43,38 @@ const Dashboard = () => {
     return () => subscription.unsubscribe();
   }, [navigate]);
 
+  useEffect(() => {
+    const loadStats = async () => {
+      if (!user?.id) return;
+      try {
+        const stats = await getWorkoutStatsForUser(user.id);
+        setTotalWorkouts(stats.total);
+        setWeeklyWorkouts(stats.thisWeek);
+      } catch (_e) {
+        // non-blocking
+      }
+    };
+    loadStats();
+  }, [user?.id]);
+
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    await signOut();
     toast({ title: "Logged out successfully" });
     navigate("/auth");
+  };
+
+  const handleSeed = async () => {
+    if (!user?.id) return;
+    try {
+      await seedDemoDataForUser(user.id);
+      toast({ title: "Demo data added" });
+      // refresh stats after seed
+      const stats = await getWorkoutStatsForUser(user.id);
+      setTotalWorkouts(stats.total);
+      setWeeklyWorkouts(stats.thisWeek);
+    } catch (e: any) {
+      toast({ title: "Seeding failed", description: e?.message || "Error", variant: "destructive" });
+    }
   };
 
   if (loading) {
@@ -63,9 +99,12 @@ const Dashboard = () => {
               <p className="text-xs text-muted-foreground">Welcome back, {user?.email?.split("@")[0]}</p>
             </div>
           </div>
-          <Button variant="ghost" size="icon" onClick={handleLogout}>
-            <LogOut className="w-5 h-5" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => navigate('/profile')}>Profile</Button>
+            <Button variant="ghost" size="icon" onClick={handleLogout}>
+              <LogOut className="w-5 h-5" />
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -89,7 +128,7 @@ const Dashboard = () => {
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">This Week</p>
-                    <h3 className="text-2xl font-bold">0 Workouts</h3>
+                    <h3 className="text-2xl font-bold">{weeklyWorkouts} Workouts</h3>
                   </div>
                 </div>
                 <div className="h-2 bg-muted rounded-full overflow-hidden">
@@ -126,7 +165,7 @@ const Dashboard = () => {
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Total Workouts</p>
-                    <h3 className="text-2xl font-bold">0</h3>
+                  <h3 className="text-2xl font-bold">{totalWorkouts}</h3>
                   </div>
                 </div>
                 <p className="text-sm text-muted-foreground">
@@ -159,7 +198,37 @@ const Dashboard = () => {
                   <History className="w-6 h-6 mr-2" />
                   View History
                 </Button>
+                {totalWorkouts === 0 && (
+                  <Button
+                    variant="outline"
+                    size="lg"
+                    className="h-16 text-lg"
+                    onClick={handleSeed}
+                  >
+                    Add Demo Data
+                  </Button>
+                )}
               </div>
+            </div>
+          </Card>
+
+          {/* Weekly Frequency Chart */}
+          <Card className="p-6 bg-card/80 border-border/50 shadow-card">
+            <div className="space-y-4">
+              <h3 className="text-xl font-semibold">Weekly Workout Frequency</h3>
+              <ChartContainer
+                config={{
+                  workouts: { label: "Workouts", color: "hsl(var(--primary))" },
+                }}
+                className="h-64"
+              >
+                <BarChart data={Object.entries(metrics.frequencyByWeek || {}).slice(-6).map(([k, v]) => ({ week: k, workouts: v }))}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="week" tickFormatter={(v) => v.replace(/^\d{4}-/, "")}/>
+                  <Bar dataKey="workouts" fill="var(--color-workouts)" radius={4} />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                </BarChart>
+              </ChartContainer>
             </div>
           </Card>
 

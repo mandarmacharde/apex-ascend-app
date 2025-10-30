@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Dumbbell, Mail, Lock } from "lucide-react";
+import { signIn, signUp } from "@/services/apiAuth";
 
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -40,22 +41,10 @@ const Auth = () => {
 
     try {
       if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (error) throw error;
+        await signIn(email, password);
         toast({ title: "Welcome back!", description: "Successfully logged in." });
       } else {
-        const redirectUrl = `${window.location.origin}/dashboard`;
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: redirectUrl,
-          },
-        });
-        if (error) throw error;
+        await signUp(email, password);
         toast({
           title: "Account created!",
           description: "You can now log in with your credentials.",
